@@ -16,18 +16,41 @@ COL_PARAM = "משתנה"
 LABEL_IMPORTANCE = "חשיבות המשתנה"
 PREFIX_POPULATION = "מאפייני אוכלוסייה_"
 PREFIX_LOAD = "תחומי העומס_"
+PREFIX_EXTRA_LOAD_DIS = "משתנים נוספים לעומס במוגבלויות_"
+PREFIX_EXTRA_ASPECT_DIS = "היבט נוסף במוגבלויות_"
+PREFIX_EXTRA_LOAD_ELDER = "משתנים נוספים לעומס באזרחים ותיקים_"
+PREFIX_GAP_DOMAINS = "תחומים עם פער_"
+
+OHE_PREFIXES: tuple[str, ...] = (
+    PREFIX_POPULATION,
+    PREFIX_LOAD,
+    PREFIX_EXTRA_LOAD_DIS,
+    PREFIX_EXTRA_ASPECT_DIS,
+    PREFIX_EXTRA_LOAD_ELDER,
+    PREFIX_GAP_DOMAINS,
+)
+
+OHE_CHART_SECTIONS: list[tuple[str, str]] = [
+    ("אוכלוסייה", PREFIX_POPULATION),
+    ("תחומי עומס", PREFIX_LOAD),
+    ("מוגבלויות — משתנים נוספים", PREFIX_EXTRA_LOAD_DIS),
+    ("מוגבלויות — היבט נוסף", PREFIX_EXTRA_ASPECT_DIS),
+    ("ותיקים — משתנים נוספים", PREFIX_EXTRA_LOAD_ELDER),
+    ("תחומים עם פער", PREFIX_GAP_DOMAINS),
+]
+
 OFFICE_NUMERIC_CONTEXT = [
     "סוג הרשות",
     "אשכול חברתי-כלכלי",
     "דיוק מדידה",
     "פער מול תקינה",
 ]
-OFFICE_BINARY_CONTEXT = ['מאפייני אוכלוסייה_אוכלוסייה כללית',
-       'מאפייני אוכלוסייה_אוכלוסייה מעורבת', 'מאפייני אוכלוסייה_חברה חרדית',
-       'מאפייני אוכלוסייה_חברה ערבית', 'תחומי העומס_מוגבלויות',
-       'תחומי העומס_אזרחים ותיקים', 'תחומי העומס_חוק סדרי דין',
-       'תחומי העומס_חוק נוער', 'תחומי העומס_משפחה',
-       'תחומי העומס_תחום נוער וצעירים']
+EXTRA_CONTEXT_COLS = [
+    "משתני המשפחה משקפים מעמסה במוגבלויות",
+    "משתני המשפחה משקפים מעמסה באזרחים ותיקים",
+    "הכי משמעותי לעומס במוגבלויות",
+]
+OFFICE_CONTEXT_SCALAR = OFFICE_NUMERIC_CONTEXT + EXTRA_CONTEXT_COLS
 Y_NUM_ALIAS = "__y_num__"
 SPECIAL_PARAM_FROM = "עבודה חוקית / רגולטורית ( האם יש מעורבות עו״ס לחוק)"
 SPECIAL_PARAM_TO = "מעורבות חוק"
@@ -80,6 +103,17 @@ def ohe_columns(df: pd.DataFrame, prefix: str) -> list[str]:
     return [c for c in df.columns if isinstance(c, str) and c.startswith(prefix)]
 
 
+def all_ohe_columns(df: pd.DataFrame) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for prefix in OHE_PREFIXES:
+        for c in ohe_columns(df, prefix):
+            if c not in seen:
+                seen.add(c)
+                ordered.append(c)
+    return ordered
+
+
 def to_bool_series(s: pd.Series) -> pd.Series:
     if s.dtype == bool:
         return s
@@ -91,9 +125,8 @@ def to_bool_series(s: pd.Series) -> pd.Series:
 
 
 def unique_office_frame(df: pd.DataFrame) -> pd.DataFrame:
-    pop_cols = ohe_columns(df, PREFIX_POPULATION)
-    load_cols = ohe_columns(df, PREFIX_LOAD)
-    key_cols = [c for c in OFFICE_NUMERIC_CONTEXT if c in df.columns] + pop_cols + load_cols
+    dummies = all_ohe_columns(df)
+    key_cols = [c for c in OFFICE_CONTEXT_SCALAR if c in df.columns] + dummies
     if not key_cols:
         return df.drop_duplicates()
     return df.drop_duplicates(subset=key_cols, ignore_index=True)
@@ -175,8 +208,8 @@ def make_x_categories(series: pd.Series) -> pd.Series:
     return series.fillna("חסר").astype(str)
 
 
-def y_is_numeric_or_binary(col: str, series: pd.Series, pop_cols: list[str], load_cols: list[str]) -> bool:
-    if col == COL_Y or col in pop_cols or col in load_cols:
+def y_is_numeric_or_binary(col: str, series: pd.Series, ohe_cols: list[str]) -> bool:
+    if col == COL_Y or col in ohe_cols:
         return True
     if pd.api.types.is_bool_dtype(series):
         return True
@@ -190,16 +223,15 @@ def bivariate_aggregate(
     frame: pd.DataFrame,
     col_x: str,
     col_y: str,
-    pop_cols: list[str],
-    load_cols: list[str],
+    ohe_cols: list[str],
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     work = frame[[col_x, col_y]].copy()
     work["_x"] = make_x_categories(work[col_x]).map(lambda v: display_value(col_x, v))
     work[col_y] = work[col_y].map(normalize_param_name)
-    use_mean = y_is_numeric_or_binary(col_y, work[col_y], pop_cols, load_cols)
+    use_mean = y_is_numeric_or_binary(col_y, work[col_y], ohe_cols)
 
     if use_mean:
-        if col_y in pop_cols or col_y in load_cols:
+        if col_y in ohe_cols:
             y_num = to_bool_series(work[col_y]).astype(float)
         else:
             y_num = pd.to_numeric(work[col_y], errors="coerce")
@@ -281,8 +313,7 @@ def main() -> None:
     if COL_PARAM in df.columns:
         df[COL_PARAM] = df[COL_PARAM].map(normalize_param_name)
 
-    pop_cols = ohe_columns(df, PREFIX_POPULATION)
-    load_cols = ohe_columns(df, PREFIX_LOAD)
+    ohe_all = all_ohe_columns(df)
     y_numeric = pd.to_numeric(df[COL_Y], errors="coerce") if COL_Y in df.columns else pd.Series(dtype=float)
 
     tab_overview, tab_y, tab_context, tab_pair, tab_ohe, tab_corr = st.tabs(
@@ -295,7 +326,7 @@ def main() -> None:
         c2.metric("עמודות", len(df.columns))
         n_params = df[COL_PARAM].nunique() if COL_PARAM in df.columns else 0
         c3.metric("משתנים", n_params)
-        c4.metric("עמודות OHE", len(pop_cols) + len(load_cols))
+        c4.metric("עמודות OHE", len(ohe_all))
 
         st.subheader("דוגמה")
         st.dataframe(prepare_display(df.head(50)), use_container_width=True, height=400, hide_index=True)
@@ -375,7 +406,7 @@ def main() -> None:
             download_csv_button(agg, "importance_by_variable", "dl_imp_var")
 
     with tab_context:
-        ctx = [c for c in OFFICE_NUMERIC_CONTEXT + OFFICE_BINARY_CONTEXT if c in df.columns]
+        ctx = [c for c in OFFICE_CONTEXT_SCALAR if c in df.columns] + [c for c in ohe_all if c in df.columns]
         if not ctx:
             st.info("אין עמודות משרד")
         elif COL_Y not in df.columns or COL_PARAM not in df.columns:
@@ -420,7 +451,7 @@ def main() -> None:
         if c1 == c2:
             st.warning("נא לבחור שני שדות שונים.")
         else:
-            g, kw = bivariate_aggregate(df, c1, c2, pop_cols, load_cols)
+            g, kw = bivariate_aggregate(df, c1, c2, ohe_all)
             if g.empty:
                 st.info("אין נתונים מספיקים לגרף.")
             else:
@@ -451,36 +482,25 @@ def main() -> None:
             out["תווית"] = out["עמודה"].str.replace(pfx, "", regex=False)
             return out.sort_values("ספירה", ascending=False)
 
-        if pop_cols:
-            st.subheader("אוכלוסייה")
-            cp = counts_from_dummies(u, pop_cols, PREFIX_POPULATION.rstrip("_"))
+        for idx, (section_title, prefix) in enumerate(OHE_CHART_SECTIONS):
+            cols = ohe_columns(df, prefix)
+            if not cols:
+                continue
+            st.subheader(section_title)
+            cp = counts_from_dummies(u, cols, prefix.rstrip("_"))
             fig_p = px.bar(
                 cp,
                 x="תווית",
                 y="ספירה",
-                title="אוכלוסייה",
+                title=section_title,
             )
             fig_p.update_xaxes(tickangle=-40)
             apply_axis_style(fig_p, "קטגוריה", "משרדים")
-            show_plot(fig_p, "population_ohe")
-            download_csv_button(cp, "population_ohe", "dl_pop_ohe")
-
-        if load_cols:
-            st.subheader("תחומי עומס")
-            cl = counts_from_dummies(u, load_cols, PREFIX_LOAD.rstrip("_"))
-            fig_l = px.bar(
-                cl,
-                x="תווית",
-                y="ספירה",
-                title="תחומי עומס",
-            )
-            fig_l.update_xaxes(tickangle=-40)
-            apply_axis_style(fig_l, "קטגוריה", "משרדים")
-            show_plot(fig_l, "load_ohe")
-            download_csv_button(cl, "load_ohe", "dl_load_ohe")
+            show_plot(fig_p, f"ohe_{idx}")
+            download_csv_button(cp, f"ohe_section_{idx}", f"dl_ohe_{idx}")
 
         with st.expander("טבלת פרופילים", expanded=False):
-            show_cols = [c for c in OFFICE_NUMERIC_CONTEXT if c in u.columns] + pop_cols + load_cols
+            show_cols = [c for c in OFFICE_CONTEXT_SCALAR if c in u.columns] + ohe_all
             show_cols = [c for c in show_cols if c in u.columns]
             profiles = prepare_display(u[show_cols])
             st.dataframe(profiles, use_container_width=True, height=360, hide_index=True)
@@ -488,7 +508,7 @@ def main() -> None:
 
     with tab_corr:
         num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        for c in pop_cols + load_cols:
+        for c in ohe_all:
             if c in df.columns and c not in num_cols:
                 num_cols.append(c)
         num_cols = list(dict.fromkeys(num_cols))
@@ -497,21 +517,24 @@ def main() -> None:
             value=True,
         )
         if focus and COL_Y in df.columns:
-            extra = [c for c in OFFICE_NUMERIC_CONTEXT if c in df.columns] + pop_cols + load_cols + [COL_Y]
+            extra = [c for c in OFFICE_CONTEXT_SCALAR if c in df.columns] + ohe_all + [COL_Y]
             picked = [c for c in extra if c in df.columns]
             corr_df_full = df[picked].copy()
             corr_df_full[Y_NUM_ALIAS] = pd.to_numeric(corr_df_full[COL_Y], errors="coerce")
-            for c in pop_cols + load_cols:
+            for c in ohe_all:
                 if c in corr_df_full.columns:
                     corr_df_full[c] = to_bool_series(corr_df_full[c]).astype(float)
             for c in OFFICE_NUMERIC_CONTEXT:
+                if c in corr_df_full.columns:
+                    corr_df_full[c] = pd.to_numeric(corr_df_full[c], errors="coerce")
+            for c in EXTRA_CONTEXT_COLS:
                 if c in corr_df_full.columns:
                     corr_df_full[c] = pd.to_numeric(corr_df_full[c], errors="coerce")
             use_cols = [c for c in corr_df_full.columns if c != COL_Y] + [Y_NUM_ALIAS]
             corr_df = corr_df_full[use_cols].copy()
         elif len(num_cols) >= 2:
             corr_df = df[num_cols].copy()
-            for c in pop_cols + load_cols:
+            for c in ohe_all:
                 if c in corr_df.columns:
                     corr_df[c] = to_bool_series(corr_df[c]).astype(float)
             corr_df = corr_df.apply(pd.to_numeric, errors="coerce")
