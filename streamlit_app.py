@@ -205,7 +205,7 @@ def make_x_categories(series: pd.Series) -> pd.Series:
             out = pd.Series("חסר", index=series.index, dtype="object")
             out.loc[valid.index] = bins
             return out
-    return series.fillna("חסר").astype(str)
+    return series.fillna("חסר")
 
 
 def y_is_numeric_or_binary(col: str, series: pd.Series, ohe_cols: list[str]) -> bool:
@@ -544,28 +544,42 @@ def main() -> None:
         if corr_df.shape[1] < 2:
             st.info("אין מספיק עמודות")
         else:
-            cmat = corr_df.corr(numeric_only=True)
-            if Y_NUM_ALIAS in cmat.columns:
-                nice_y = "חשיבות"
-                cmat = cmat.rename(index={Y_NUM_ALIAS: nice_y}, columns={Y_NUM_ALIAS: nice_y})
-            fig_c = go.Figure(
-                data=go.Heatmap(
-                    z=cmat.values,
-                    x=cmat.columns,
-                    y=cmat.columns,
-                    zmin=-1,
-                    zmax=1,
-                    colorscale="RdBu_r",
+            all_corr_cols = list(corr_df.columns)
+            default_corr_cols = [c for c in [Y_NUM_ALIAS] + OFFICE_CONTEXT_SCALAR if c in all_corr_cols]
+            if len(default_corr_cols) < 2:
+                default_corr_cols = all_corr_cols[: min(12, len(all_corr_cols))]
+            selected_corr_cols = st.multiselect(
+                "משתנים למפה",
+                options=all_corr_cols,
+                default=default_corr_cols,
+                key="corr_cols_select",
+            )
+            if len(selected_corr_cols) < 2:
+                st.info("בחר לפחות 2 משתנים")
+            else:
+                corr_df = corr_df[selected_corr_cols].copy()
+                cmat = corr_df.corr(numeric_only=True)
+                if Y_NUM_ALIAS in cmat.columns:
+                    nice_y = "חשיבות"
+                    cmat = cmat.rename(index={Y_NUM_ALIAS: nice_y}, columns={Y_NUM_ALIAS: nice_y})
+                fig_c = go.Figure(
+                    data=go.Heatmap(
+                        z=cmat.values,
+                        x=cmat.columns,
+                        y=cmat.columns,
+                        zmin=-1,
+                        zmax=1,
+                        colorscale="RdBu_r",
+                    )
                 )
-            )
-            fig_c.update_layout(
-                title="מפת מתאם",
-                height=max(500, len(cmat.columns) * 14),
-                xaxis_title="",
-                yaxis_title="",
-            )
-            show_plot(fig_c, "correlation")
-            download_csv_button(cmat.reset_index().rename(columns={"index": "row"}), "correlation_matrix", "dl_corr")
+                fig_c.update_layout(
+                    title="מפת מתאם",
+                    height=max(500, len(cmat.columns) * 14),
+                    xaxis_title="",
+                    yaxis_title="",
+                )
+                show_plot(fig_c, "correlation")
+                download_csv_button(cmat.reset_index().rename(columns={"index": "row"}), "correlation_matrix", "dl_corr")
 
     st.divider()
     st.caption("survey_encoded.xlsx")
