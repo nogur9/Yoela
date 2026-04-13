@@ -63,6 +63,14 @@ AUTHORITY_ORDER: dict[str, int | None] = {
     "מועצה מקומית (עד 20 אלף תושבים)": 1,
 }
 
+PARAM_ORDER: dict[str, str | None] ={
+    'שלב התיק (חדש / פעיל / ותיק)(לפי סולם של גיל התיק במחלקה)': 'שלב התיק',
+     'רמת אינטנסיביות הטיפול ( לפי מספר העדכונים בתיק בחודש)': 'אינטנסיביות הטיפול',
+     'מספר בני המשפחה המעורבים (לפי מס׳ בני המשפחה שנכללים בתיק)': 'מספר בני המשפחה המעורבים',
+     'ריבוי בעיות ותחומי קושי(לפי מספר המאפיינים בתיק)': 'ריבוי בעיות',
+     'עבודה חוקית / רגולטורית ( האם יש מעורבות עו״ס לחוק)': 'מעורבות חוק',
+     'עבודה בין מערכתית ( האם נדרשה וותת״ט ולפי מס גורמים נוספים שיש בתיק)': 'עבודה בין מערכתית'}
+
 CLUSTER_ORDER: dict[str, int] = {
     "7–10": 9,
     "1–3": 2,
@@ -276,6 +284,12 @@ def main() -> None:
         st.markdown("**סוג הרשות**")
         st.dataframe(
             prepare_display(legend_table_from_mapping(AUTHORITY_ORDER, "מספר בקובץ")),
+            hide_index=True,
+            use_container_width=True,
+        )
+        st.markdown("**משתנה**")
+        st.dataframe(
+            prepare_display(legend_table_from_mapping(PARAM_ORDER, "שם בקובץ")),
             hide_index=True,
             use_container_width=True,
         )
